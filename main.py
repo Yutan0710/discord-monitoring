@@ -20,13 +20,8 @@ from database import (
     create_online_log,
     DailyOnlineReport,
     get_daily_online_reports,
+    get_notification_targets,
     get_user_by_discord_id,
-)
-from email_service import (
-    format_duration,
-    send_daily_report,
-    send_offline_notification,
-    send_online_notification,
 )
 
 
@@ -43,6 +38,23 @@ except ZoneInfoNotFoundError:
     JST = timezone(timedelta(hours=9), "JST")
 
 DAILY_REPORT_TIME = time(hour=0, minute=5, tzinfo=JST)
+
+
+def format_duration(duration_seconds: int | None) -> str:
+    """Format online duration for Discord notifications."""
+    if duration_seconds is None:
+        return "時間不明"
+
+    hours, remainder = divmod(duration_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    if hours > 0:
+        return f"{hours}時間{minutes}分{seconds}秒"
+
+    if minutes > 0:
+        return f"{minutes}分{seconds}秒"
+
+    return f"{seconds}秒"
 
 
 def generate_daily_report_graph(
@@ -91,14 +103,69 @@ def generate_daily_report_graph(
     return graph_path
 
 
-def run_daily_report(target_date: date | None = None) -> None:
+async def send_dm_to_notification_targets(
+    bot: commands.Bot,
+    monitored_discord_user_id: int,
+    message: str,
+    file_path: Path | None = None,
+) -> None:
+    """Send a DM to every active notification target for a monitored user."""
+    try:
+        target_user_ids = await asyncio.to_thread(
+            get_notification_targets,
+            monitored_discord_user_id,
+        )
+    except Exception:
+        logger.exception(
+            "通知先ユーザーの取得中に予期しないエラーが発生しました。"
+            "monitored_discord_user_id=%s",
+            monitored_discord_user_id,
+        )
+        return
+
+    if not target_user_ids:
+        logger.info(
+            "有効なDM通知先がありません。monitored_discord_user_id=%s",
+            monitored_discord_user_id,
+        )
+        return
+
+    for target_user_id in target_user_ids:
+        try:
+            target_user = await bot.fetch_user(target_user_id)
+            if file_path is None:
+                await target_user.send(message)
+            else:
+                await target_user.send(
+                    message,
+                    file=discord.File(file_path),
+                )
+
+            logger.info(
+                "DM通知を送信しました。monitored_discord_user_id=%s target_user_id=%s",
+                monitored_discord_user_id,
+                target_user_id,
+            )
+        except Exception:
+            logger.exception(
+                "DM通知の送信に失敗しました。"
+                "monitored_discord_user_id=%s target_user_id=%s",
+                monitored_discord_user_id,
+                target_user_id,
+            )
+
+
+async def run_daily_report(
+    bot: commands.Bot,
+    target_date: date | None = None,
+) -> None:
     """Create and send daily reports for all monitored users."""
     report_date = target_date or (
         datetime.now(JST).date() - timedelta(days=1)
     )
 
     try:
-        reports = get_daily_online_reports(report_date)
+        reports = await asyncio.to_thread(get_daily_online_reports, report_date)
     except Exception:
         logger.exception("日次レポート集計に失敗しました。report_date=%s", report_date)
         return
@@ -112,13 +179,28 @@ def run_daily_report(target_date: date | None = None) -> None:
 
         for report in reports:
             try:
-                graph_path = generate_daily_report_graph(report, output_dir)
-                send_daily_report(
-                    to_email=report.email,
-                    username=report.username,
-                    report_date=report.report_date,
-                    total_duration_seconds=report.total_duration_seconds,
-                    graph_path=graph_path,
+                graph_path = await asyncio.to_thread(
+                    generate_daily_report_graph,
+                    report,
+                    output_dir,
+                )
+                message = "\n".join(
+                    [
+                        f"**【Discord】日次オンラインレポート {report.report_date}**",
+                        "",
+                        "Discordオンライン日次レポートです。",
+                        "",
+                        f"ユーザー名: {report.username}",
+                        f"対象日: {report.report_date}",
+                        "合計オンライン時間: "
+                        f"{format_duration(report.total_duration_seconds)}",
+                    ]
+                )
+                await send_dm_to_notification_targets(
+                    bot=bot,
+                    monitored_discord_user_id=report.discord_user_id,
+                    message=message,
+                    file_path=graph_path,
                 )
                 logger.info(
                     "日次レポートを送信しました。discord_user_id=%s total=%s",
@@ -183,7 +265,7 @@ def create_bot(target_user_id: int) -> commands.Bot:
     async def daily_report_task() -> None:
         """Run the daily report job while the bot is active."""
         try:
-            await asyncio.to_thread(run_daily_report)
+            await run_daily_report(bot)
         except Exception:
             logger.exception("日次レポートタスクで予期しないエラーが発生しました。")
 
@@ -228,7 +310,7 @@ def create_bot(target_user_id: int) -> commands.Bot:
         current_time = current_datetime.strftime("%Y-%m-%d %H:%M:%S %Z")
 
         try:
-            # DBから通知先と表示名を取得し、登録がなければメール通知は行いません。
+            # DBから監視対象ユーザー情報を取得し、登録がなければDM通知は行いません。
             monitored_user = await asyncio.to_thread(
                 get_user_by_discord_id,
                 after.id,
@@ -242,7 +324,7 @@ def create_bot(target_user_id: int) -> commands.Bot:
 
         if monitored_user is None:
             logger.info(
-                "DBに登録されていないためメール通知をスキップしました。discord_user_id=%s",
+                "DBに登録されていないためDM通知をスキップしました。discord_user_id=%s",
                 after.id,
             )
             return
@@ -268,20 +350,28 @@ def create_bot(target_user_id: int) -> commands.Bot:
             print("==================")
 
             try:
-                await asyncio.to_thread(
-                    send_online_notification,
-                    monitored_user.email,
-                    username,
-                    current_time,
+                message = "\n".join(
+                    [
+                        f"**【Discord】{username} がオンラインになりました**",
+                        "",
+                        "Discordユーザーがオンラインになりました。",
+                        "",
+                        f"ユーザー名: {username}",
+                        f"時刻: {current_time}",
+                    ]
+                )
+                await send_dm_to_notification_targets(
+                    bot=bot,
+                    monitored_discord_user_id=monitored_user.discord_user_id,
+                    message=message,
                 )
                 logger.info(
-                    "オンライン通知メール処理が完了しました。discord_user_id=%s email=%s",
+                    "オンラインDM通知処理が完了しました。discord_user_id=%s",
                     monitored_user.discord_user_id,
-                    monitored_user.email,
                 )
             except Exception:
                 logger.exception(
-                    "オンライン通知メール処理中に予期しないエラーが発生しました。"
+                    "オンラインDM通知処理中に予期しないエラーが発生しました。"
                 )
 
             return
@@ -299,21 +389,29 @@ def create_bot(target_user_id: int) -> commands.Bot:
             )
 
         try:
-            await asyncio.to_thread(
-                send_offline_notification,
-                monitored_user.email,
-                username,
-                current_time,
-                duration_seconds,
+            message = "\n".join(
+                [
+                    f"**【Discord】{username} がオフラインになりました**",
+                    "",
+                    "Discordユーザーがオフラインになりました。",
+                    "",
+                    f"ユーザー名: {username}",
+                    f"時刻: {current_time}",
+                    f"オンライン時間: {format_duration(duration_seconds)}",
+                ]
+            )
+            await send_dm_to_notification_targets(
+                bot=bot,
+                monitored_discord_user_id=monitored_user.discord_user_id,
+                message=message,
             )
             logger.info(
-                "オフライン通知メール処理が完了しました。discord_user_id=%s email=%s",
+                "オフラインDM通知処理が完了しました。discord_user_id=%s",
                 monitored_user.discord_user_id,
-                monitored_user.email,
             )
         except Exception:
             logger.exception(
-                "オフライン通知メール処理中に予期しないエラーが発生しました。"
+                "オフラインDM通知処理中に予期しないエラーが発生しました。"
             )
 
     @bot.event

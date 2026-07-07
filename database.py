@@ -121,6 +121,44 @@ def get_user_by_discord_id(discord_user_id: int) -> MonitoredUser | None:
     )
 
 
+def get_notification_targets(monitored_discord_user_id: int) -> list[int]:
+    """Fetch active Discord user IDs that should receive notifications."""
+    query = """
+        SELECT notify_discord_user_id
+        FROM notification_targets
+        WHERE monitored_discord_user_id = %s
+          AND is_active = true
+        ORDER BY notify_discord_user_id
+    """
+
+    try:
+        database_url = get_database_url()
+
+        with psycopg2.connect(database_url) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(query, (monitored_discord_user_id,))
+                rows = cursor.fetchall()
+
+    except RuntimeError:
+        logger.exception("データベース設定の読み込みに失敗しました。")
+        raise
+    except psycopg2.Error:
+        logger.exception(
+            "通知先ユーザーの取得に失敗しました。monitored_discord_user_id=%s",
+            monitored_discord_user_id,
+        )
+        return []
+
+    target_user_ids = [int(row[0]) for row in rows]
+    logger.info(
+        "通知先ユーザーを取得しました。monitored_discord_user_id=%s count=%s",
+        monitored_discord_user_id,
+        len(target_user_ids),
+    )
+
+    return target_user_ids
+
+
 def create_online_log(discord_user_id: int, online_at: datetime) -> None:
     """Create a new online log entry."""
     query = """
