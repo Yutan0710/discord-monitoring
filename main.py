@@ -103,6 +103,49 @@ def generate_daily_report_graph(
     return graph_path
 
 
+def build_demo_daily_report(
+    discord_user_id: int,
+    username: str,
+) -> DailyOnlineReport:
+    """Build fixed demo data for manual DM verification."""
+    hourly_minutes = [
+        0,
+        0,
+        0,
+        0,
+        0,
+        15,
+        45,
+        60,
+        35,
+        0,
+        20,
+        50,
+        60,
+        40,
+        0,
+        0,
+        25,
+        60,
+        60,
+        30,
+        10,
+        0,
+        0,
+        0,
+    ]
+    hourly_seconds = tuple(minutes * 60 for minutes in hourly_minutes)
+
+    return DailyOnlineReport(
+        discord_user_id=discord_user_id,
+        username=username,
+        email="",
+        report_date=datetime.now(JST).date() - timedelta(days=1),
+        total_duration_seconds=sum(hourly_seconds),
+        hourly_duration_seconds=hourly_seconds,
+    )
+
+
 async def send_dm_to_notification_targets(
     bot: commands.Bot,
     monitored_discord_user_id: int,
@@ -283,6 +326,48 @@ def create_bot(target_user_id: int) -> commands.Bot:
         if not daily_report_task.is_running():
             daily_report_task.start()
             logger.info("日次レポートタスクを開始しました。実行時刻=%s", DAILY_REPORT_TIME)
+
+    @bot.command(name="demo_report")
+    async def demo_report(context: commands.Context[commands.Bot]) -> None:
+        """Send a demo daily report graph to the command author by DM."""
+        author = context.author
+        report = build_demo_daily_report(author.id, author.display_name)
+        message = "\n".join(
+            [
+                f"**【Discord】日次オンラインレポート {report.report_date}**",
+                "",
+                "Discordオンライン日次レポートです。",
+                "",
+                f"ユーザー名: {report.username}",
+                f"対象日: {report.report_date}",
+                "合計オンライン時間: "
+                f"{format_duration(report.total_duration_seconds)}",
+            ]
+        )
+
+        try:
+            with tempfile.TemporaryDirectory() as temporary_dir:
+                output_dir = Path(temporary_dir)
+                graph_path = await asyncio.to_thread(
+                    generate_daily_report_graph,
+                    report,
+                    output_dir,
+                )
+                await author.send(
+                    message,
+                    file=discord.File(graph_path),
+                )
+
+            await context.send("デモ日次レポートをDMに送信しました。")
+            logger.info("デモ日次レポートを送信しました。user_id=%s", author.id)
+        except Exception:
+            logger.exception(
+                "デモ日次レポートのDM送信に失敗しました。user_id=%s",
+                author.id,
+            )
+            await context.send(
+                "デモ日次レポートのDM送信に失敗しました。DM設定を確認してください。"
+            )
 
     @bot.event
     async def on_presence_update(
