@@ -2,39 +2,69 @@
 
 from __future__ import annotations
 
+import base64
 import logging
 import os
-import smtplib
 from datetime import date, datetime
-from email.message import EmailMessage
 from pathlib import Path
 
+import requests
 from dotenv import load_dotenv
 
 
 logger = logging.getLogger(__name__)
 
+RESEND_EMAILS_URL = "https://api.resend.com/emails"
 
-def get_smtp_config() -> tuple[str, int, str, str]:
-    """Load SMTP settings from environment variables."""
+
+def get_resend_config() -> tuple[str, str]:
+    """Load Resend API settings from environment variables."""
     load_dotenv()
 
-    smtp_host = os.getenv("SMTP_HOST")
-    smtp_port = os.getenv("SMTP_PORT")
-    smtp_user = os.getenv("SMTP_USER")
-    smtp_password = os.getenv("SMTP_PASSWORD")
+    resend_api_key = os.getenv("RESEND_API_KEY")
+    from_email = os.getenv("FROM_EMAIL")
 
-    if not all((smtp_host, smtp_port, smtp_user, smtp_password)):
+    if not resend_api_key or not from_email:
         raise RuntimeError(
-            "SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD を .env に設定してください。"
+            "RESEND_API_KEY と FROM_EMAIL を .env に設定してください。"
         )
 
-    try:
-        port = int(smtp_port)
-    except ValueError as error:
-        raise RuntimeError("SMTP_PORT は数値で設定してください。") from error
+    return resend_api_key, from_email
 
-    return smtp_host, port, smtp_user, smtp_password
+
+def send_email_via_resend(
+    to_email: str,
+    subject: str,
+    body: str,
+    attachments: list[dict[str, str]] | None = None,
+) -> None:
+    """Send an email using the Resend HTTP API."""
+    resend_api_key, from_email = get_resend_config()
+    payload: dict[str, object] = {
+        "from": from_email,
+        "to": [to_email],
+        "subject": subject,
+        "text": body,
+    }
+
+    if attachments:
+        payload["attachments"] = attachments
+
+    response = requests.post(
+        RESEND_EMAILS_URL,
+        headers={
+            "Authorization": f"Bearer {resend_api_key}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=30,
+    )
+
+    if response.status_code >= 400:
+        raise RuntimeError(
+            "Resend APIでメール送信に失敗しました。"
+            f"status_code={response.status_code} response={response.text}"
+        )
 
 
 def send_online_notification(
@@ -42,15 +72,10 @@ def send_online_notification(
     username: str,
     online_time: str,
 ) -> None:
-    """Send an online notification email via Gmail SMTP."""
+    """Send an online notification email via Resend API."""
     try:
-        smtp_host, smtp_port, smtp_user, smtp_password = get_smtp_config()
-
-        message = EmailMessage()
-        message["From"] = smtp_user
-        message["To"] = to_email
-        message["Subject"] = f"【Discord】{username} がオンラインになりました"
-        message.set_content(
+        subject = f"【Discord】{username} がオンラインになりました"
+        body = (
             "\n".join(
                 [
                     "Discordユーザーがオンラインになりました。",
@@ -60,16 +85,11 @@ def send_online_notification(
                 ]
             )
         )
-
-        # Gmail SMTPではTLSを有効化してからログインします。
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as smtp:
-            smtp.starttls()
-            smtp.login(smtp_user, smtp_password)
-            smtp.send_message(message)
+        send_email_via_resend(to_email, subject, body)
 
         logger.info("オンライン通知メールを送信しました。to_email=%s", to_email)
 
-    except (RuntimeError, smtplib.SMTPException, OSError):
+    except (RuntimeError, requests.RequestException):
         logger.exception(
             "オンライン通知メールの送信に失敗しました。to_email=%s username=%s",
             to_email,
@@ -100,16 +120,11 @@ def send_offline_notification(
     offline_time: str,
     duration_seconds: int | None,
 ) -> None:
-    """Send an offline notification email via Gmail SMTP."""
+    """Send an offline notification email via Resend API."""
     try:
-        smtp_host, smtp_port, smtp_user, smtp_password = get_smtp_config()
         duration_text = format_duration(duration_seconds)
-
-        message = EmailMessage()
-        message["From"] = smtp_user
-        message["To"] = to_email
-        message["Subject"] = f"【Discord】{username} がオフラインになりました"
-        message.set_content(
+        subject = f"【Discord】{username} がオフラインになりました"
+        body = (
             "\n".join(
                 [
                     "Discordユーザーがオフラインになりました。",
@@ -120,16 +135,11 @@ def send_offline_notification(
                 ]
             )
         )
-
-        # Gmail SMTPではTLSを有効化してからログインします。
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as smtp:
-            smtp.starttls()
-            smtp.login(smtp_user, smtp_password)
-            smtp.send_message(message)
+        send_email_via_resend(to_email, subject, body)
 
         logger.info("オフライン通知メールを送信しました。to_email=%s", to_email)
 
-    except (RuntimeError, smtplib.SMTPException, OSError):
+    except (RuntimeError, requests.RequestException):
         logger.exception(
             "オフライン通知メールの送信に失敗しました。to_email=%s username=%s",
             to_email,
@@ -146,14 +156,9 @@ def send_daily_report(
 ) -> None:
     """Send a daily online report email with a PNG graph attachment."""
     try:
-        smtp_host, smtp_port, smtp_user, smtp_password = get_smtp_config()
         duration_text = format_duration(total_duration_seconds)
-
-        message = EmailMessage()
-        message["From"] = smtp_user
-        message["To"] = to_email
-        message["Subject"] = f"【Discord】日次オンラインレポート {report_date}"
-        message.set_content(
+        subject = f"【Discord】日次オンラインレポート {report_date}"
+        body = (
             "\n".join(
                 [
                     "Discordオンライン日次レポートです。",
@@ -166,18 +171,19 @@ def send_daily_report(
         )
 
         with graph_path.open("rb") as graph_file:
-            message.add_attachment(
-                graph_file.read(),
-                maintype="image",
-                subtype="png",
-                filename=graph_path.name,
-            )
+            graph_content = base64.b64encode(graph_file.read()).decode("ascii")
 
-        # Gmail SMTPではTLSを有効化してからログインします。
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as smtp:
-            smtp.starttls()
-            smtp.login(smtp_user, smtp_password)
-            smtp.send_message(message)
+        send_email_via_resend(
+            to_email=to_email,
+            subject=subject,
+            body=body,
+            attachments=[
+                {
+                    "filename": graph_path.name,
+                    "content": graph_content,
+                }
+            ],
+        )
 
         logger.info(
             "日次レポートメールを送信しました。to_email=%s report_date=%s",
@@ -185,7 +191,7 @@ def send_daily_report(
             report_date,
         )
 
-    except (RuntimeError, smtplib.SMTPException, OSError):
+    except (RuntimeError, requests.RequestException, OSError):
         logger.exception(
             "日次レポートメールの送信に失敗しました。to_email=%s username=%s",
             to_email,
