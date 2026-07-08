@@ -278,7 +278,7 @@ def generate_daily_report_graph(
         (0.285, "#5865f2", "オンライン"),
         (0.415, "#f6bd3b", "退席中 (idle)"),
         (0.555, "#f04747", "取り込み中 (dnd)"),
-        (0.715, "#d6d9de", "オフライン"),
+        (0.695, "#d6d9de", "オフライン"),
     ]
     for x_position, color, label in legend_items:
         canvas.scatter([x_position], [0.302], s=110, marker="s", color=color)
@@ -316,7 +316,7 @@ def generate_daily_report_graph(
         (0.17, "#5865f2", "オンライン", format_duration_minutes(total_seconds), total_percent),
         (0.39, "#f6bd3b", "退席中 (idle)", "0時間00分", 0.0),
         (0.61, "#f04747", "取り込み中 (dnd)", "0時間00分", 0.0),
-        (0.83, "#d6d9de", "オフライン", format_duration_minutes(offline_seconds), offline_percent),
+        (0.81, "#d6d9de", "オフライン", format_duration_minutes(offline_seconds), offline_percent),
     ]
     for index, (x_position, color, label, duration, percent) in enumerate(summary_items):
         if index > 0:
@@ -326,12 +326,12 @@ def generate_daily_report_graph(
                 color="#dfe3eb",
                 linewidth=1,
             )
-        canvas.scatter([x_position - 0.055], [0.155], s=50, color=color)
+        canvas.scatter([x_position - 0.035], [0.155], s=50, color=color)
         canvas.text(
-            x_position - 0.04,
+            x_position,
             0.155,
             label,
-            ha="left",
+            ha="center",
             va="center",
             fontsize=9,
             color="#3b404a",
