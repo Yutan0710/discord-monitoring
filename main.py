@@ -326,12 +326,14 @@ def generate_daily_report_graph(
                 color="#dfe3eb",
                 linewidth=1,
             )
-        canvas.scatter([x_position - 0.035], [0.155], s=50, color=color)
+        marker_x = x_position - 0.075
+        label_x = x_position - 0.055
+        canvas.scatter([marker_x], [0.155], s=50, color=color)
         canvas.text(
-            x_position,
+            label_x,
             0.155,
             label,
-            ha="center",
+            ha="left",
             va="center",
             fontsize=9,
             color="#3b404a",
