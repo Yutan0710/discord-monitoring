@@ -153,12 +153,6 @@ async def send_dm_to_notification_targets(
     file_path: Path | None = None,
 ) -> None:
     """Send a DM to every active notification target for a monitored user."""
-    logger.info(
-        "DM通知処理を開始します。monitored_discord_user_id=%s has_file=%s",
-        monitored_discord_user_id,
-        file_path is not None,
-    )
-
     try:
         target_user_ids = await asyncio.to_thread(
             get_notification_targets,
@@ -179,20 +173,9 @@ async def send_dm_to_notification_targets(
         )
         return
 
-    logger.info(
-        "DM通知先を取得しました。monitored_discord_user_id=%s targets=%s",
-        monitored_discord_user_id,
-        target_user_ids,
-    )
-
     for target_user_id in target_user_ids:
         try:
             target_user = await bot.fetch_user(target_user_id)
-            logger.info(
-                "DM送信を試行します。target_user_id=%s target_user_name=%s",
-                target_user_id,
-                target_user.name,
-            )
             if file_path is None:
                 await target_user.send(message)
             else:
@@ -304,80 +287,6 @@ def get_target_user_id() -> int:
         raise RuntimeError("TARGET_USER_ID は数値で設定してください。") from error
 
 
-async def log_guild_debug_info(
-    bot: commands.Bot,
-    target_user_id: int,
-) -> None:
-    """Log guild and target member information for presence debugging."""
-    logger.info(
-        "Intent設定: presences=%s members=%s message_content=%s",
-        bot.intents.presences,
-        bot.intents.members,
-        bot.intents.message_content,
-    )
-    logger.info("接続中のguild数: %s", len(bot.guilds))
-
-    for guild in bot.guilds:
-        logger.info(
-            "接続中guild: id=%s name=%s member_count=%s chunked=%s",
-            guild.id,
-            guild.name,
-            guild.member_count,
-            guild.chunked,
-        )
-
-        member = guild.get_member(target_user_id)
-        if member is not None:
-            logger.info(
-                "TARGET_USER_IDのmemberをキャッシュから取得しました。"
-                "guild_id=%s member_id=%s name=%s status=%s",
-                guild.id,
-                member.id,
-                member.name,
-                member.status,
-            )
-            continue
-
-        logger.warning(
-            "TARGET_USER_IDのmemberをキャッシュから取得できません。"
-            "guild_id=%s target_user_id=%s",
-            guild.id,
-            target_user_id,
-        )
-
-        try:
-            fetched_member = await guild.fetch_member(target_user_id)
-        except discord.NotFound:
-            logger.warning(
-                "TARGET_USER_IDのmemberはこのguildに見つかりません。"
-                "guild_id=%s target_user_id=%s",
-                guild.id,
-                target_user_id,
-            )
-        except discord.Forbidden:
-            logger.exception(
-                "TARGET_USER_IDのmember取得権限がありません。"
-                "guild_id=%s target_user_id=%s",
-                guild.id,
-                target_user_id,
-            )
-        except discord.DiscordException:
-            logger.exception(
-                "TARGET_USER_IDのmember取得に失敗しました。"
-                "guild_id=%s target_user_id=%s",
-                guild.id,
-                target_user_id,
-            )
-        else:
-            logger.info(
-                "TARGET_USER_IDのmemberをAPIから取得しました。"
-                "guild_id=%s member_id=%s name=%s status=%s",
-                guild.id,
-                fetched_member.id,
-                fetched_member.name,
-                fetched_member.status,
-            )
-
 
 def create_bot(target_user_id: int) -> commands.Bot:
     """Create and configure the Discord bot."""
@@ -414,8 +323,6 @@ def create_bot(target_user_id: int) -> commands.Bot:
         print("Botが起動しました")
         print(f"Bot名: {bot.user.name}")
         print(f"Bot ID: {bot.user.id}")
-
-        await log_guild_debug_info(bot, target_user_id)
 
         if not daily_report_task.is_running():
             daily_report_task.start()
@@ -469,48 +376,20 @@ def create_bot(target_user_id: int) -> commands.Bot:
         after: discord.Member,
     ) -> None:
         """Handle online and offline notifications for the target user."""
-        target_matches = after.id == target_user_id
-        logger.info(
-            "on_presence_updateを受信しました。"
-            "before_id=%s before_status=%s after_status=%s "
-            "after_name=%s target_user_id=%s target_matches=%s",
-            before.id,
-            before.status,
-            after.status,
-            after.name,
-            target_user_id,
-            target_matches,
-        )
-
-        if not target_matches:
+        if after.id != target_user_id:
             return
 
+        # idleやdndもDiscord上はオンライン扱いなので、offline以外をオンラインとして扱います。
         is_online = (
             before.status == discord.Status.offline
-            and after.status == discord.Status.online
+            and after.status != discord.Status.offline
         )
         is_offline = (
             before.status != discord.Status.offline
             and after.status == discord.Status.offline
         )
 
-        logger.info(
-            "監視対象ユーザーのpresence判定結果: "
-            "is_online=%s is_offline=%s before_status=%s after_status=%s",
-            is_online,
-            is_offline,
-            before.status,
-            after.status,
-        )
-
         if not is_online and not is_offline:
-            logger.info(
-                "通知対象外のpresence変化のためスキップします。"
-                "discord_user_id=%s before_status=%s after_status=%s",
-                after.id,
-                before.status,
-                after.status,
-            )
             return
 
         # ローカルタイムゾーンの現在時刻を通知に表示します。
