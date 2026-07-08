@@ -75,6 +75,7 @@ def to_day_hour(value: datetime) -> float:
         + value_jst.second / 3600
     )
 
+
 def format_duration(duration_seconds: int | None) -> str:
     """Format online duration for Discord notifications."""
     if duration_seconds is None:
@@ -103,19 +104,36 @@ def generate_daily_report_graph(
     os.environ.setdefault("MPLCONFIGDIR", str(matplotlib_config_dir))
 
     import matplotlib.pyplot as plt
+    from matplotlib import font_manager
     from matplotlib.patches import Circle, FancyBboxPatch
 
-    try:
-        import japanize_matplotlib  # type: ignore[import-not-found]
+    import importlib.util
 
-        japanize_matplotlib.japanize()
-    except ImportError:
-        from matplotlib import font_manager
+    japanese_font = None
+    package_spec = importlib.util.find_spec("japanize_matplotlib")
+    if package_spec and package_spec.submodule_search_locations:
+        package_dir = Path(package_spec.submodule_search_locations[0])
+        font_path = package_dir / "fonts" / "ipaexg.ttf"
+        if font_path.exists():
+            font_manager.fontManager.addfont(str(font_path))
+            japanese_font = "IPAexGothic"
 
-        font_candidates = ["Yu Gothic", "Meiryo", "MS Gothic", "Noto Sans JP", "BIZ UDGothic"]
+    if japanese_font is None:
+        font_candidates = [
+            "Yu Gothic",
+            "Meiryo",
+            "MS Gothic",
+            "Noto Sans JP",
+            "BIZ UDGothic",
+            "sans-serif",
+        ]
         available_fonts = {font.name for font in font_manager.fontManager.ttflist}
-        japanese_font = next((font for font in font_candidates if font in available_fonts), "sans-serif")
-        plt.rcParams["font.family"] = [japanese_font]
+        japanese_font = next(
+            (font for font in font_candidates if font in available_fonts),
+            "sans-serif",
+        )
+
+    plt.rcParams["font.family"] = [japanese_font]
 
     plt.rcParams["axes.unicode_minus"] = False
 
@@ -126,63 +144,248 @@ def generate_daily_report_graph(
     total_percent = total_seconds / (24 * 3600) * 100
     offline_percent = offline_seconds / (24 * 3600) * 100
 
-    figure = plt.figure(figsize=(12.28, 6.14), dpi=100, facecolor="#f8fafc")
+    figure = plt.figure(figsize=(12.8, 6.3), dpi=100, facecolor="#f8fafc")
     canvas = figure.add_axes([0, 0, 1, 1])
+    canvas.set_xlim(0, 1)
+    canvas.set_ylim(0, 1)
     canvas.axis("off")
 
-    card = FancyBboxPatch((0.01, 0.02), 0.98, 0.96, boxstyle="round,pad=0.01,rounding_size=0.02", linewidth=1.2, edgecolor="#d9dee7", facecolor="#ffffff")
+    card = FancyBboxPatch(
+        (0.02, 0.03),
+        0.96,
+        0.94,
+        boxstyle="round,pad=0.008,rounding_size=0.018",
+        linewidth=1.2,
+        edgecolor="#d9dee7",
+        facecolor="#ffffff",
+    )
     canvas.add_patch(card)
-    icon = Circle((0.05, 0.90), 0.035, facecolor="#5865f2", edgecolor="none")
+
+    icon = Circle((0.065, 0.895), 0.032, facecolor="#5865f2", edgecolor="none")
     canvas.add_patch(icon)
-    canvas.text(0.05, 0.90, "D", ha="center", va="center", color="#ffffff", fontsize=24, fontweight="bold")
-    canvas.text(0.085, 0.915, f"{display_username} のオンライン履歴", ha="left", va="center", fontsize=24, fontweight="bold", color="#17181c")
+    canvas.text(
+        0.065,
+        0.895,
+        "D",
+        ha="center",
+        va="center",
+        color="#ffffff",
+        fontsize=22,
+    )
+    canvas.text(
+        0.10,
+        0.91,
+        f"{display_username} のオンライン履歴",
+        ha="left",
+        va="center",
+        fontsize=23,
+        color="#17181c",
+    )
 
-    badge_style = {"boxstyle": "round,pad=0.45,rounding_size=0.12", "facecolor": "#ffffff", "edgecolor": "#dfe3eb", "linewidth": 1}
-    canvas.text(0.09, 0.835, f"日付: {format_report_date(report.report_date)}", fontsize=12, color="#242832", bbox=badge_style)
-    canvas.text(0.255, 0.835, f"合計オンライン時間: {format_duration_minutes(total_seconds)}", fontsize=12, color="#242832", bbox=badge_style)
-    canvas.text(0.47, 0.835, f"オンライン回数: {len(report.online_intervals)}回", fontsize=12, color="#242832", bbox=badge_style)
+    badge_style = {
+        "boxstyle": "round,pad=0.38,rounding_size=0.10",
+        "facecolor": "#ffffff",
+        "edgecolor": "#dfe3eb",
+        "linewidth": 1,
+    }
+    canvas.text(
+        0.10,
+        0.83,
+        f"日付: {format_report_date(report.report_date)}",
+        fontsize=11,
+        color="#242832",
+        bbox=badge_style,
+    )
+    canvas.text(
+        0.32,
+        0.83,
+        f"合計オンライン時間: {format_duration_minutes(total_seconds)}",
+        fontsize=11,
+        color="#242832",
+        bbox=badge_style,
+    )
+    canvas.text(
+        0.58,
+        0.83,
+        f"オンライン回数: {len(report.online_intervals)}回",
+        fontsize=11,
+        color="#242832",
+        bbox=badge_style,
+    )
 
-    timeline_card = FancyBboxPatch((0.03, 0.36), 0.94, 0.40, boxstyle="round,pad=0.01,rounding_size=0.012", linewidth=1, edgecolor="#dfe3eb", facecolor="#ffffff")
+    timeline_card = FancyBboxPatch(
+        (0.04, 0.36),
+        0.92,
+        0.38,
+        boxstyle="round,pad=0.008,rounding_size=0.012",
+        linewidth=1,
+        edgecolor="#dfe3eb",
+        facecolor="#ffffff",
+    )
     canvas.add_patch(timeline_card)
-    timeline = figure.add_axes([0.08, 0.42, 0.87, 0.25])
+    canvas.text(
+        0.065,
+        0.53,
+        display_username,
+        ha="center",
+        va="center",
+        fontsize=13,
+        color="#242832",
+    )
+
+    timeline = figure.add_axes([0.095, 0.43, 0.84, 0.22])
     timeline.set_xlim(0, 24)
     timeline.set_ylim(0, 1)
     timeline.axis("off")
 
     for hour in range(0, 25, 2):
-        timeline.axvline(hour, color="#e4e7ee", linestyle=(0, (2, 4)), linewidth=1)
-        timeline.text(hour, 0.98, f"{hour:02d}:00", ha="center", va="bottom", fontsize=11, color="#5e6470")
+        timeline.axvline(
+            hour,
+            color="#e4e7ee",
+            linestyle=(0, (2, 4)),
+            linewidth=1,
+        )
+        timeline.text(
+            hour,
+            0.96,
+            f"{hour:02d}:00",
+            ha="center",
+            va="bottom",
+            fontsize=10,
+            color="#5e6470",
+        )
 
-    timeline.text(-0.55, 0.47, display_username, ha="right", va="center", fontsize=15, fontweight="bold", color="#242832")
-    timeline.broken_barh([(0, 24)], (0.38, 0.22), facecolors="#edf0f3", edgecolors="none")
+    timeline.broken_barh(
+        [(0, 24)],
+        (0.40, 0.20),
+        facecolors="#edf0f3",
+        edgecolors="none",
+    )
 
-    for interval in report.online_intervals:
+    label_rows = [0.31, 0.22]
+    for index, interval in enumerate(report.online_intervals):
         start = max(0, min(24, to_day_hour(interval.online_at)))
         end = max(0, min(24, to_day_hour(interval.offline_at)))
         if end <= start:
             continue
-        timeline.broken_barh([(start, end - start)], (0.38, 0.22), facecolors="#5865f2", edgecolors="none")
-        timeline.text(start, 0.30, interval.online_at.astimezone(JST).strftime("%H:%M"), ha="center", va="top", fontsize=11, color="#5865f2")
-        timeline.text(end, 0.30, interval.offline_at.astimezone(JST).strftime("%H:%M"), ha="center", va="top", fontsize=11, color="#5865f2")
 
-    legend_card = FancyBboxPatch((0.22, 0.27), 0.56, 0.055, boxstyle="round,pad=0.01,rounding_size=0.01", linewidth=1, edgecolor="#dfe3eb", facecolor="#ffffff")
+        timeline.broken_barh(
+            [(start, end - start)],
+            (0.40, 0.20),
+            facecolors="#5865f2",
+            edgecolors="none",
+        )
+        label_y = label_rows[index % len(label_rows)]
+        timeline.text(
+            start,
+            label_y,
+            interval.online_at.astimezone(JST).strftime("%H:%M"),
+            ha="center",
+            va="top",
+            fontsize=9,
+            color="#5865f2",
+        )
+        timeline.text(
+            end,
+            label_y,
+            interval.offline_at.astimezone(JST).strftime("%H:%M"),
+            ha="center",
+            va="top",
+            fontsize=9,
+            color="#5865f2",
+        )
+
+    legend_card = FancyBboxPatch(
+        (0.24, 0.275),
+        0.52,
+        0.055,
+        boxstyle="round,pad=0.008,rounding_size=0.01",
+        linewidth=1,
+        edgecolor="#dfe3eb",
+        facecolor="#ffffff",
+    )
     canvas.add_patch(legend_card)
-    legend_items = [(0.26, "#5865f2", "オンライン"), (0.39, "#f6bd3b", "退席中 (idle)"), (0.53, "#f04747", "取り込み中 (dnd)"), (0.69, "#d6d9de", "オフライン")]
-    for x_position, color, label in legend_items:
-        canvas.scatter([x_position], [0.297], s=120, marker="s", color=color)
-        canvas.text(x_position + 0.02, 0.297, label, ha="left", va="center", fontsize=10, color="#3b404a")
 
-    summary_card = FancyBboxPatch((0.03, 0.04), 0.94, 0.17, boxstyle="round,pad=0.01,rounding_size=0.012", linewidth=1, edgecolor="#dfe3eb", facecolor="#ffffff")
+    legend_items = [
+        (0.285, "#5865f2", "オンライン"),
+        (0.415, "#f6bd3b", "退席中 (idle)"),
+        (0.555, "#f04747", "取り込み中 (dnd)"),
+        (0.715, "#d6d9de", "オフライン"),
+    ]
+    for x_position, color, label in legend_items:
+        canvas.scatter([x_position], [0.302], s=110, marker="s", color=color)
+        canvas.text(
+            x_position + 0.018,
+            0.302,
+            label,
+            ha="left",
+            va="center",
+            fontsize=9,
+            color="#3b404a",
+        )
+
+    summary_card = FancyBboxPatch(
+        (0.04, 0.06),
+        0.92,
+        0.15,
+        boxstyle="round,pad=0.008,rounding_size=0.012",
+        linewidth=1,
+        edgecolor="#dfe3eb",
+        facecolor="#ffffff",
+    )
     canvas.add_patch(summary_card)
-    canvas.text(0.04, 0.19, "ステータス別合計時間", ha="left", va="center", fontsize=11, fontweight="bold", color="#242832")
-    summary_items = [(0.15, "#5865f2", "オンライン", format_duration_minutes(total_seconds), total_percent), (0.37, "#f6bd3b", "退席中 (idle)", "0時間00分", 0.0), (0.59, "#f04747", "取り込み中 (dnd)", "0時間00分", 0.0), (0.81, "#d6d9de", "オフライン", format_duration_minutes(offline_seconds), offline_percent)]
+    canvas.text(
+        0.06,
+        0.19,
+        "ステータス別合計時間",
+        ha="left",
+        va="center",
+        fontsize=10,
+        color="#242832",
+    )
+
+    summary_items = [
+        (0.17, "#5865f2", "オンライン", format_duration_minutes(total_seconds), total_percent),
+        (0.39, "#f6bd3b", "退席中 (idle)", "0時間00分", 0.0),
+        (0.61, "#f04747", "取り込み中 (dnd)", "0時間00分", 0.0),
+        (0.83, "#d6d9de", "オフライン", format_duration_minutes(offline_seconds), offline_percent),
+    ]
     for index, (x_position, color, label, duration, percent) in enumerate(summary_items):
         if index > 0:
-            canvas.plot([x_position - 0.11, x_position - 0.11], [0.07, 0.175], color="#dfe3eb", linewidth=1)
-        canvas.scatter([x_position - 0.055], [0.155], s=55, color=color)
-        canvas.text(x_position - 0.04, 0.155, label, ha="left", va="center", fontsize=10, color="#3b404a")
-        canvas.text(x_position, 0.105, duration, ha="center", va="center", fontsize=17, fontweight="bold", color="#242832")
-        canvas.text(x_position, 0.075, f"({percent:.1f}%)", ha="center", va="center", fontsize=10, color="#5e6470")
+            canvas.plot(
+                [x_position - 0.11, x_position - 0.11],
+                [0.08, 0.175],
+                color="#dfe3eb",
+                linewidth=1,
+            )
+        canvas.scatter([x_position - 0.055], [0.155], s=50, color=color)
+        canvas.text(
+            x_position - 0.04,
+            0.155,
+            label,
+            ha="left",
+            va="center",
+            fontsize=9,
+            color="#3b404a",
+        )
+        canvas.text(
+            x_position,
+            0.11,
+            duration,
+            ha="center",
+            va="center",
+            fontsize=16,
+            color="#242832",
+        )
+        canvas.text(
+            x_position,
+            0.08,
+            f"({percent:.1f}%)",
+            ha="center",
+            va="center",
+            fontsize=9,
+            color="#5e6470",
+        )
 
     figure.savefig(graph_path, format="png", bbox_inches="tight", pad_inches=0)
     plt.close(figure)
