@@ -40,6 +40,15 @@ except ZoneInfoNotFoundError:
 DAILY_REPORT_TIME = time(hour=0, minute=5, tzinfo=JST)
 
 
+def format_display_username(username: str) -> str:
+    """Return the display name used in Discord notifications."""
+    display_name_overrides = {
+        "ゆうたん": "星野拓海",
+    }
+
+    return display_name_overrides.get(username, username)
+
+
 def format_duration(duration_seconds: int | None) -> str:
     """Format online duration for Discord notifications."""
     if duration_seconds is None:
@@ -233,7 +242,7 @@ async def run_daily_report(
                         "",
                         "Discordオンライン日次レポートです。",
                         "",
-                        f"ユーザー名: {report.username}",
+                        f"ユーザー名: {format_display_username(report.username)}",
                         f"対象日: {report.report_date}",
                         "合計オンライン時間: "
                         f"{format_duration(report.total_duration_seconds)}",
@@ -339,7 +348,7 @@ def create_bot(target_user_id: int) -> commands.Bot:
                 "",
                 "Discordオンライン日次レポートです。",
                 "",
-                f"ユーザー名: {report.username}",
+                f"ユーザー名: {format_display_username(report.username)}",
                 f"対象日: {report.report_date}",
                 "合計オンライン時間: "
                 f"{format_duration(report.total_duration_seconds)}",
@@ -392,8 +401,8 @@ def create_bot(target_user_id: int) -> commands.Bot:
         if not is_online and not is_offline:
             return
 
-        # ローカルタイムゾーンの現在時刻を通知に表示します。
-        current_datetime = datetime.now().astimezone()
+        # Railway上でも日本時間で通知できるようにJST固定にします。
+        current_datetime = datetime.now(JST)
         current_time = current_datetime.strftime("%Y-%m-%d %H:%M:%S %Z")
 
         try:
@@ -416,7 +425,9 @@ def create_bot(target_user_id: int) -> commands.Bot:
             )
             return
 
-        username = monitored_user.username or after.display_name
+        username = format_display_username(
+            monitored_user.username or after.display_name,
+        )
 
         if is_online:
             try:
@@ -440,8 +451,6 @@ def create_bot(target_user_id: int) -> commands.Bot:
                 message = "\n".join(
                     [
                         f"**【Discord】{username} がオンラインになりました**",
-                        "",
-                        "Discordユーザーがオンラインになりました。",
                         "",
                         f"ユーザー名: {username}",
                         f"時刻: {current_time}",
@@ -479,8 +488,6 @@ def create_bot(target_user_id: int) -> commands.Bot:
             message = "\n".join(
                 [
                     f"**【Discord】{username} がオフラインになりました**",
-                    "",
-                    "Discordユーザーがオフラインになりました。",
                     "",
                     f"ユーザー名: {username}",
                     f"時刻: {current_time}",
