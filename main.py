@@ -250,36 +250,6 @@ def generate_daily_report_graph(
         facecolors="#edf0f3",
         edgecolors="none",
     )
-
-    label_positions: list[tuple[float, float]] = []
-    label_rows = [0.31, 0.22, 0.13]
-
-    def add_time_label(x_position: float, label: str) -> None:
-        """Place a time label while avoiding nearby label collisions."""
-        adjusted_x = max(0.35, min(23.65, x_position))
-        label_y = label_rows[len(label_positions) % len(label_rows)]
-
-        for previous_x, previous_y in label_positions:
-            if abs(adjusted_x - previous_x) < 0.55 and label_y == previous_y:
-                next_row_index = (
-                    label_rows.index(label_y) + 1
-                ) % len(label_rows)
-                label_y = label_rows[next_row_index]
-            if abs(adjusted_x - previous_x) < 0.35:
-                adjusted_x += 0.35 if adjusted_x >= previous_x else -0.35
-                adjusted_x = max(0.35, min(23.65, adjusted_x))
-
-        label_positions.append((adjusted_x, label_y))
-        timeline.text(
-            adjusted_x,
-            label_y,
-            label,
-            ha="center",
-            va="top",
-            fontsize=8,
-            color="#5865f2",
-        )
-
     for interval in report.online_intervals:
         start = max(0, min(24, to_day_hour(interval.online_at)))
         end = max(0, min(24, to_day_hour(interval.offline_at)))
@@ -291,14 +261,6 @@ def generate_daily_report_graph(
             (0.40, 0.20),
             facecolors="#5865f2",
             edgecolors="none",
-        )
-        add_time_label(
-            start,
-            interval.online_at.astimezone(JST).strftime("%H:%M"),
-        )
-        add_time_label(
-            end,
-            interval.offline_at.astimezone(JST).strftime("%H:%M"),
         )
 
     legend_card = FancyBboxPatch(
@@ -757,10 +719,11 @@ def create_bot(target_user_id: int) -> commands.Bot:
             try:
                 message = "\n".join(
                     [
-                        f"**【Discord】{username} がオンラインになりました**",
-                        "",
+                        "━━━━━━━━━━━━",
+                        "**【オンライン通知】**",
                         f"ユーザー名: {username}",
                         f"時刻: {current_time}",
+                        "━━━━━━━━━━━━",
                     ]
                 )
                 await send_dm_to_notification_targets(
@@ -794,11 +757,12 @@ def create_bot(target_user_id: int) -> commands.Bot:
         try:
             message = "\n".join(
                 [
-                    f"**【Discord】{username} がオフラインになりました**",
-                    "",
+                    "━━━━━━━━━━━━",
+                    "**【オフライン通知】**",
                     f"ユーザー名: {username}",
                     f"時刻: {current_time}",
                     f"オンライン時間: {format_duration(duration_seconds)}",
+                    "━━━━━━━━━━━━",
                 ]
             )
             await send_dm_to_notification_targets(
