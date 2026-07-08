@@ -19,6 +19,7 @@ from database import (
     close_latest_online_log,
     create_online_log,
     DailyOnlineReport,
+    OnlineInterval,
     get_daily_online_reports,
     get_notification_targets,
     get_user_by_discord_id,
@@ -49,6 +50,31 @@ def format_display_username(username: str) -> str:
     return display_name_overrides.get(username, username)
 
 
+def format_duration_minutes(duration_seconds: int) -> str:
+    """Format a duration without seconds for daily report images."""
+    hours, remainder = divmod(max(0, duration_seconds), 3600)
+    minutes = remainder // 60
+
+    return f"{hours}時間{minutes:02d}分"
+
+
+def format_report_date(report_date: date) -> str:
+    """Format a report date with a Japanese weekday."""
+    weekdays = ["月", "火", "水", "木", "金", "土", "日"]
+
+    return report_date.strftime("%Y/%m/%d") + f" ({weekdays[report_date.weekday()]})"
+
+
+def to_day_hour(value: datetime) -> float:
+    """Convert a datetime to an hour position in its JST day."""
+    value_jst = value.astimezone(JST)
+
+    return (
+        value_jst.hour
+        + value_jst.minute / 60
+        + value_jst.second / 3600
+    )
+
 def format_duration(duration_seconds: int | None) -> str:
     """Format online duration for Discord notifications."""
     if duration_seconds is None:
@@ -70,43 +96,95 @@ def generate_daily_report_graph(
     report: DailyOnlineReport,
     output_dir: Path,
 ) -> Path:
-    """Generate a daily online duration bar chart as a PNG file."""
+    """Generate a timeline-style daily online report as a PNG file."""
     os.environ.setdefault("MPLBACKEND", "Agg")
     matplotlib_config_dir = output_dir / ".matplotlib"
     matplotlib_config_dir.mkdir(exist_ok=True)
     os.environ.setdefault("MPLCONFIGDIR", str(matplotlib_config_dir))
-    from matplotlib import font_manager
-    import matplotlib.pyplot as plt
 
-    font_candidates = [
-        "Yu Gothic",
-        "Meiryo",
-        "MS Gothic",
-        "Noto Sans JP",
-        "BIZ UDGothic",
-    ]
-    available_fonts = {font.name for font in font_manager.fontManager.ttflist}
-    japanese_font = next(
-        (font for font in font_candidates if font in available_fonts),
-        "sans-serif",
-    )
-    plt.rcParams["font.family"] = [japanese_font]
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Circle, FancyBboxPatch
+
+    try:
+        import japanize_matplotlib  # type: ignore[import-not-found]
+
+        japanize_matplotlib.japanize()
+    except ImportError:
+        from matplotlib import font_manager
+
+        font_candidates = ["Yu Gothic", "Meiryo", "MS Gothic", "Noto Sans JP", "BIZ UDGothic"]
+        available_fonts = {font.name for font in font_manager.fontManager.ttflist}
+        japanese_font = next((font for font in font_candidates if font in available_fonts), "sans-serif")
+        plt.rcParams["font.family"] = [japanese_font]
+
     plt.rcParams["axes.unicode_minus"] = False
 
     graph_path = output_dir / f"daily_report_{report.discord_user_id}.png"
-    hours = list(range(24))
-    minutes = [seconds / 60 for seconds in report.hourly_duration_seconds]
+    display_username = format_display_username(report.username)
+    total_seconds = max(0, report.total_duration_seconds)
+    offline_seconds = max(0, 24 * 3600 - total_seconds)
+    total_percent = total_seconds / (24 * 3600) * 100
+    offline_percent = offline_seconds / (24 * 3600) * 100
 
-    figure, axis = plt.subplots(figsize=(10, 4))
-    axis.bar(hours, minutes, color="#4f8fd9")
-    axis.set_title(f"日次オンラインレポート - {report.report_date}")
-    axis.set_xlabel("時間帯（Asia/Tokyo）")
-    axis.set_ylabel("オンライン時間（分）")
-    axis.set_xticks(hours)
-    axis.set_xlim(-0.5, 23.5)
-    axis.grid(axis="y", alpha=0.3)
-    figure.tight_layout()
-    figure.savefig(graph_path, format="png")
+    figure = plt.figure(figsize=(12.28, 6.14), dpi=100, facecolor="#f8fafc")
+    canvas = figure.add_axes([0, 0, 1, 1])
+    canvas.axis("off")
+
+    card = FancyBboxPatch((0.01, 0.02), 0.98, 0.96, boxstyle="round,pad=0.01,rounding_size=0.02", linewidth=1.2, edgecolor="#d9dee7", facecolor="#ffffff")
+    canvas.add_patch(card)
+    icon = Circle((0.05, 0.90), 0.035, facecolor="#5865f2", edgecolor="none")
+    canvas.add_patch(icon)
+    canvas.text(0.05, 0.90, "D", ha="center", va="center", color="#ffffff", fontsize=24, fontweight="bold")
+    canvas.text(0.085, 0.915, f"{display_username} のオンライン履歴", ha="left", va="center", fontsize=24, fontweight="bold", color="#17181c")
+
+    badge_style = {"boxstyle": "round,pad=0.45,rounding_size=0.12", "facecolor": "#ffffff", "edgecolor": "#dfe3eb", "linewidth": 1}
+    canvas.text(0.09, 0.835, f"日付: {format_report_date(report.report_date)}", fontsize=12, color="#242832", bbox=badge_style)
+    canvas.text(0.255, 0.835, f"合計オンライン時間: {format_duration_minutes(total_seconds)}", fontsize=12, color="#242832", bbox=badge_style)
+    canvas.text(0.47, 0.835, f"オンライン回数: {len(report.online_intervals)}回", fontsize=12, color="#242832", bbox=badge_style)
+
+    timeline_card = FancyBboxPatch((0.03, 0.36), 0.94, 0.40, boxstyle="round,pad=0.01,rounding_size=0.012", linewidth=1, edgecolor="#dfe3eb", facecolor="#ffffff")
+    canvas.add_patch(timeline_card)
+    timeline = figure.add_axes([0.08, 0.42, 0.87, 0.25])
+    timeline.set_xlim(0, 24)
+    timeline.set_ylim(0, 1)
+    timeline.axis("off")
+
+    for hour in range(0, 25, 2):
+        timeline.axvline(hour, color="#e4e7ee", linestyle=(0, (2, 4)), linewidth=1)
+        timeline.text(hour, 0.98, f"{hour:02d}:00", ha="center", va="bottom", fontsize=11, color="#5e6470")
+
+    timeline.text(-0.55, 0.47, display_username, ha="right", va="center", fontsize=15, fontweight="bold", color="#242832")
+    timeline.broken_barh([(0, 24)], (0.38, 0.22), facecolors="#edf0f3", edgecolors="none")
+
+    for interval in report.online_intervals:
+        start = max(0, min(24, to_day_hour(interval.online_at)))
+        end = max(0, min(24, to_day_hour(interval.offline_at)))
+        if end <= start:
+            continue
+        timeline.broken_barh([(start, end - start)], (0.38, 0.22), facecolors="#5865f2", edgecolors="none")
+        timeline.text(start, 0.30, interval.online_at.astimezone(JST).strftime("%H:%M"), ha="center", va="top", fontsize=11, color="#5865f2")
+        timeline.text(end, 0.30, interval.offline_at.astimezone(JST).strftime("%H:%M"), ha="center", va="top", fontsize=11, color="#5865f2")
+
+    legend_card = FancyBboxPatch((0.22, 0.27), 0.56, 0.055, boxstyle="round,pad=0.01,rounding_size=0.01", linewidth=1, edgecolor="#dfe3eb", facecolor="#ffffff")
+    canvas.add_patch(legend_card)
+    legend_items = [(0.26, "#5865f2", "オンライン"), (0.39, "#f6bd3b", "退席中 (idle)"), (0.53, "#f04747", "取り込み中 (dnd)"), (0.69, "#d6d9de", "オフライン")]
+    for x_position, color, label in legend_items:
+        canvas.scatter([x_position], [0.297], s=120, marker="s", color=color)
+        canvas.text(x_position + 0.02, 0.297, label, ha="left", va="center", fontsize=10, color="#3b404a")
+
+    summary_card = FancyBboxPatch((0.03, 0.04), 0.94, 0.17, boxstyle="round,pad=0.01,rounding_size=0.012", linewidth=1, edgecolor="#dfe3eb", facecolor="#ffffff")
+    canvas.add_patch(summary_card)
+    canvas.text(0.04, 0.19, "ステータス別合計時間", ha="left", va="center", fontsize=11, fontweight="bold", color="#242832")
+    summary_items = [(0.15, "#5865f2", "オンライン", format_duration_minutes(total_seconds), total_percent), (0.37, "#f6bd3b", "退席中 (idle)", "0時間00分", 0.0), (0.59, "#f04747", "取り込み中 (dnd)", "0時間00分", 0.0), (0.81, "#d6d9de", "オフライン", format_duration_minutes(offline_seconds), offline_percent)]
+    for index, (x_position, color, label, duration, percent) in enumerate(summary_items):
+        if index > 0:
+            canvas.plot([x_position - 0.11, x_position - 0.11], [0.07, 0.175], color="#dfe3eb", linewidth=1)
+        canvas.scatter([x_position - 0.055], [0.155], s=55, color=color)
+        canvas.text(x_position - 0.04, 0.155, label, ha="left", va="center", fontsize=10, color="#3b404a")
+        canvas.text(x_position, 0.105, duration, ha="center", va="center", fontsize=17, fontweight="bold", color="#242832")
+        canvas.text(x_position, 0.075, f"({percent:.1f}%)", ha="center", va="center", fontsize=10, color="#5e6470")
+
+    figure.savefig(graph_path, format="png", bbox_inches="tight", pad_inches=0)
     plt.close(figure)
 
     return graph_path
@@ -144,14 +222,34 @@ def build_demo_daily_report(
         0,
     ]
     hourly_seconds = tuple(minutes * 60 for minutes in hourly_minutes)
+    report_date = datetime.now(JST).date() - timedelta(days=1)
+    online_intervals = (
+        OnlineInterval(
+            online_at=datetime.combine(report_date, time(6, 16), tzinfo=JST),
+            offline_at=datetime.combine(report_date, time(17, 1), tzinfo=JST),
+        ),
+        OnlineInterval(
+            online_at=datetime.combine(report_date, time(18, 15), tzinfo=JST),
+            offline_at=datetime.combine(report_date, time(18, 31), tzinfo=JST),
+        ),
+        OnlineInterval(
+            online_at=datetime.combine(report_date, time(19, 0), tzinfo=JST),
+            offline_at=datetime.combine(report_date, time(23, 0), tzinfo=JST),
+        ),
+    )
+    total_duration_seconds = sum(
+        int((interval.offline_at - interval.online_at).total_seconds())
+        for interval in online_intervals
+    )
 
     return DailyOnlineReport(
         discord_user_id=discord_user_id,
         username=username,
         email="",
-        report_date=datetime.now(JST).date() - timedelta(days=1),
-        total_duration_seconds=sum(hourly_seconds),
+        report_date=report_date,
+        total_duration_seconds=total_duration_seconds,
         hourly_duration_seconds=hourly_seconds,
+        online_intervals=online_intervals,
     )
 
 

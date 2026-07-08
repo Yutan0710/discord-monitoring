@@ -33,6 +33,14 @@ class MonitoredUser:
 
 
 @dataclass(frozen=True, slots=True)
+class OnlineInterval:
+    """A clipped online interval in JST for a daily report."""
+
+    online_at: datetime
+    offline_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class DailyOnlineReport:
     """Daily online summary for a monitored Discord user."""
 
@@ -42,6 +50,7 @@ class DailyOnlineReport:
     report_date: date
     total_duration_seconds: int
     hourly_duration_seconds: tuple[int, ...]
+    online_intervals: tuple[OnlineInterval, ...]
 
 
 def to_utc_naive(value: datetime) -> datetime:
@@ -312,6 +321,10 @@ def get_daily_online_reports(target_date: date) -> list[DailyOnlineReport]:
             discord_user_id,
             target_date,
         )
+        online_intervals = get_daily_online_intervals(
+            discord_user_id,
+            target_date,
+        )
         reports.append(
             DailyOnlineReport(
                 discord_user_id=discord_user_id,
@@ -320,6 +333,7 @@ def get_daily_online_reports(target_date: date) -> list[DailyOnlineReport]:
                 report_date=target_date,
                 total_duration_seconds=max(0, int(row[3])),
                 hourly_duration_seconds=hourly_duration_seconds,
+                online_intervals=online_intervals,
             )
         )
 
@@ -332,6 +346,69 @@ def get_daily_online_reports(target_date: date) -> list[DailyOnlineReport]:
     return reports
 
 
+def get_daily_online_intervals(
+    discord_user_id: int,
+    target_date: date,
+) -> tuple[OnlineInterval, ...]:
+    """Fetch online intervals clipped to the target JST date."""
+    query = """
+        SELECT online_at, COALESCE(offline_at, %s)
+        FROM online_logs
+        WHERE discord_user_id = %s
+          AND online_at <= %s
+          AND COALESCE(offline_at, %s) >= %s
+        ORDER BY online_at
+    """
+
+    start_utc, end_utc = get_jst_day_range_utc_naive(target_date)
+
+    try:
+        database_url = get_database_url()
+
+        with psycopg2.connect(database_url) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    query,
+                    (end_utc, discord_user_id, end_utc, end_utc, start_utc),
+                )
+                rows = cursor.fetchall()
+
+    except RuntimeError:
+        logger.exception("データベース設定の読み込みに失敗しました。")
+        raise
+    except psycopg2.Error:
+        logger.exception(
+            "日次オンライン区間の取得に失敗しました。discord_user_id=%s",
+            discord_user_id,
+        )
+        return ()
+
+    jst = get_jst_timezone()
+    day_start = datetime.combine(target_date, time.min, tzinfo=jst)
+    day_end = day_start + timedelta(days=1)
+    intervals: list[OnlineInterval] = []
+
+    for online_at, offline_at in rows:
+        online_jst = to_utc_naive(online_at).replace(
+            tzinfo=timezone.utc
+        ).astimezone(jst)
+        offline_jst = to_utc_naive(offline_at).replace(
+            tzinfo=timezone.utc
+        ).astimezone(jst)
+
+        interval_start = max(online_jst, day_start)
+        interval_end = min(offline_jst, day_end)
+        if interval_end <= interval_start:
+            continue
+
+        intervals.append(
+            OnlineInterval(
+                online_at=interval_start,
+                offline_at=interval_end,
+            )
+        )
+
+    return tuple(intervals)
 def get_hourly_online_durations(
     discord_user_id: int,
     target_date: date,
