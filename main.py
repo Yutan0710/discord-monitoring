@@ -105,7 +105,7 @@ def generate_daily_report_graph(
 
     import matplotlib.pyplot as plt
     from matplotlib import font_manager
-    from matplotlib.patches import Circle, FancyBboxPatch
+    from matplotlib.patches import FancyBboxPatch
 
     import importlib.util
 
@@ -161,19 +161,8 @@ def generate_daily_report_graph(
     )
     canvas.add_patch(card)
 
-    icon = Circle((0.065, 0.895), 0.032, facecolor="#5865f2", edgecolor="none")
-    canvas.add_patch(icon)
     canvas.text(
-        0.065,
-        0.895,
-        "D",
-        ha="center",
-        va="center",
-        color="#ffffff",
-        fontsize=22,
-    )
-    canvas.text(
-        0.10,
+        0.055,
         0.91,
         f"{display_username} のオンライン履歴",
         ha="left",
@@ -189,7 +178,7 @@ def generate_daily_report_graph(
         "linewidth": 1,
     }
     canvas.text(
-        0.10,
+        0.055,
         0.83,
         f"日付: {format_report_date(report.report_date)}",
         fontsize=11,
@@ -197,7 +186,7 @@ def generate_daily_report_graph(
         bbox=badge_style,
     )
     canvas.text(
-        0.32,
+        0.285,
         0.83,
         f"合計オンライン時間: {format_duration_minutes(total_seconds)}",
         fontsize=11,
@@ -205,7 +194,7 @@ def generate_daily_report_graph(
         bbox=badge_style,
     )
     canvas.text(
-        0.58,
+        0.545,
         0.83,
         f"オンライン回数: {len(report.online_intervals)}回",
         fontsize=11,
@@ -262,8 +251,36 @@ def generate_daily_report_graph(
         edgecolors="none",
     )
 
-    label_rows = [0.31, 0.22]
-    for index, interval in enumerate(report.online_intervals):
+    label_positions: list[tuple[float, float]] = []
+    label_rows = [0.31, 0.22, 0.13]
+
+    def add_time_label(x_position: float, label: str) -> None:
+        """Place a time label while avoiding nearby label collisions."""
+        adjusted_x = max(0.35, min(23.65, x_position))
+        label_y = label_rows[len(label_positions) % len(label_rows)]
+
+        for previous_x, previous_y in label_positions:
+            if abs(adjusted_x - previous_x) < 0.55 and label_y == previous_y:
+                next_row_index = (
+                    label_rows.index(label_y) + 1
+                ) % len(label_rows)
+                label_y = label_rows[next_row_index]
+            if abs(adjusted_x - previous_x) < 0.35:
+                adjusted_x += 0.35 if adjusted_x >= previous_x else -0.35
+                adjusted_x = max(0.35, min(23.65, adjusted_x))
+
+        label_positions.append((adjusted_x, label_y))
+        timeline.text(
+            adjusted_x,
+            label_y,
+            label,
+            ha="center",
+            va="top",
+            fontsize=8,
+            color="#5865f2",
+        )
+
+    for interval in report.online_intervals:
         start = max(0, min(24, to_day_hour(interval.online_at)))
         end = max(0, min(24, to_day_hour(interval.offline_at)))
         if end <= start:
@@ -275,24 +292,13 @@ def generate_daily_report_graph(
             facecolors="#5865f2",
             edgecolors="none",
         )
-        label_y = label_rows[index % len(label_rows)]
-        timeline.text(
+        add_time_label(
             start,
-            label_y,
             interval.online_at.astimezone(JST).strftime("%H:%M"),
-            ha="center",
-            va="top",
-            fontsize=9,
-            color="#5865f2",
         )
-        timeline.text(
+        add_time_label(
             end,
-            label_y,
             interval.offline_at.astimezone(JST).strftime("%H:%M"),
-            ha="center",
-            va="top",
-            fontsize=9,
-            color="#5865f2",
         )
 
     legend_card = FancyBboxPatch(
