@@ -723,7 +723,7 @@ def create_bot(target_user_id: int) -> commands.Bot:
                 message = "\n".join(
                     [
                         "━━━━━━━━━━━━",
-                        "**【🟢オンライン通知】**",
+                        "**🟢オンライン通知**",
                         f"ユーザー名: {username}",
                         f"時刻: {current_time}",
                         "━━━━━━━━━━━━",
@@ -761,7 +761,7 @@ def create_bot(target_user_id: int) -> commands.Bot:
             message = "\n".join(
                 [
                     "━━━━━━━━━━━━",
-                    "**【🔴オフライン通知】**",
+                    "**🔴オフライン通知**",
                     f"ユーザー名: {username}",
                     f"時刻: {current_time}",
                     f"オンライン時間: {format_duration(duration_seconds)}",
