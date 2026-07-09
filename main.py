@@ -7,6 +7,7 @@ import logging
 import os
 import sys
 import tempfile
+import unicodedata
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -42,12 +43,8 @@ DAILY_REPORT_TIME = time(hour=0, minute=5, tzinfo=JST)
 
 
 def format_display_username(username: str) -> str:
-    """Return the display name used in Discord notifications."""
-    display_name_overrides = {
-        "ゆうたん": "星野拓海",
-    }
-
-    return display_name_overrides.get(username, username)
+    """Return the fixed display name used in Discord notifications."""
+    return unicodedata.normalize("NFC", "星野拓海")
 
 
 def format_duration_minutes(duration_seconds: int) -> str:
@@ -134,6 +131,7 @@ def generate_daily_report_graph(
         )
 
     plt.rcParams["font.family"] = [japanese_font]
+    plt.rcParams["font.sans-serif"] = [japanese_font]
 
     plt.rcParams["axes.unicode_minus"] = False
 
@@ -612,7 +610,10 @@ def create_bot(target_user_id: int) -> commands.Bot:
     async def demo_report(context: commands.Context[commands.Bot]) -> None:
         """Send a demo daily report graph to the command author by DM."""
         author = context.author
-        report = build_demo_daily_report(author.id, author.display_name)
+        report = build_demo_daily_report(
+            author.id,
+            format_display_username(author.display_name),
+        )
         message = "\n".join(
             [
                 f"**【Discord】日次オンラインレポート {report.report_date}**",
