@@ -2,6 +2,7 @@ services:
   postgres:
     image: postgres:17
     container_name: discord-monitoring-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
@@ -10,6 +11,17 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+
+  bot:
+    build: .
+    container_name: discord-monitoring-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/discord_monitoring
+    depends_on:
+      - postgres
 
 volumes:
   postgres_data:
