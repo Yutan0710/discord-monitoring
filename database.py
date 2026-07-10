@@ -130,6 +130,42 @@ def get_user_by_discord_id(discord_user_id: int) -> MonitoredUser | None:
     )
 
 
+def get_all_monitored_users() -> list[MonitoredUser]:
+    """Fetch all monitored Discord users."""
+    query = """
+        SELECT discord_user_id, username, email
+        FROM monitored_users
+        ORDER BY discord_user_id
+    """
+
+    try:
+        database_url = get_database_url()
+
+        with psycopg2.connect(database_url) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(query)
+                rows = cursor.fetchall()
+
+    except RuntimeError:
+        logger.exception("データベース設定の読み込みに失敗しました。")
+        raise
+    except psycopg2.Error:
+        logger.exception("monitored_users の全件取得に失敗しました。")
+        return []
+
+    users = [
+        MonitoredUser(
+            discord_user_id=int(row[0]),
+            username=str(row[1]),
+            email=str(row[2]),
+        )
+        for row in rows
+    ]
+    logger.info("監視対象ユーザー一覧を取得しました。count=%s", len(users))
+
+    return users
+
+
 def get_notification_targets(monitored_discord_user_id: int) -> list[int]:
     """Fetch active Discord user IDs that should receive notifications."""
     query = """
@@ -409,6 +445,8 @@ def get_daily_online_intervals(
         )
 
     return tuple(intervals)
+
+
 def get_hourly_online_durations(
     discord_user_id: int,
     target_date: date,

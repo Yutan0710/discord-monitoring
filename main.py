@@ -21,6 +21,7 @@ from database import (
     create_online_log,
     DailyOnlineReport,
     OnlineInterval,
+    get_all_monitored_users,
     get_daily_online_reports,
     get_notification_targets,
     get_user_by_discord_id,
@@ -582,6 +583,102 @@ def create_bot(target_user_id: int) -> commands.Bot:
     intents.members = True
 
     bot = commands.Bot(command_prefix="!", intents=intents)
+    monitored_user_ids: set[int] = {target_user_id}
+
+    async def load_monitored_user_ids() -> None:
+        """Load monitored user IDs from DB, falling back to TARGET_USER_ID."""
+        nonlocal monitored_user_ids
+
+        try:
+            monitored_users = await asyncio.to_thread(get_all_monitored_users)
+        except Exception:
+            logger.exception(
+                "監視対象ユーザー一覧の取得に失敗しました。"
+                "TARGET_USER_IDのみを監視します。target_user_id=%s",
+                target_user_id,
+            )
+            monitored_user_ids = {target_user_id}
+            return
+
+        if monitored_users:
+            monitored_user_ids = {
+                user.discord_user_id for user in monitored_users
+            }
+        else:
+            monitored_user_ids = {target_user_id}
+            logger.warning(
+                "DBに監視対象ユーザーが存在しません。"
+                "TARGET_USER_IDのみを監視します。target_user_id=%s",
+                target_user_id,
+            )
+
+        logger.info(
+            "監視対象ユーザーIDを読み込みました。ids=%s",
+            sorted(monitored_user_ids),
+        )
+
+    async def log_monitored_member_statuses() -> None:
+        """Log whether each monitored user can be resolved in each guild."""
+        for guild in bot.guilds:
+            logger.info(
+                "Guild確認: guild_id=%s guild_name=%s member_count=%s",
+                guild.id,
+                guild.name,
+                guild.member_count,
+            )
+
+            for monitored_user_id in sorted(monitored_user_ids):
+                member = guild.get_member(monitored_user_id)
+                if member is not None:
+                    logger.info(
+                        "監視対象member取得成功(get_member): "
+                        "guild_id=%s user_id=%s name=%s status=%s",
+                        guild.id,
+                        monitored_user_id,
+                        member.name,
+                        member.status,
+                    )
+                    continue
+
+                logger.info(
+                    "監視対象member取得失敗(get_member=None): "
+                    "guild_id=%s user_id=%s",
+                    guild.id,
+                    monitored_user_id,
+                )
+
+                try:
+                    fetched_member = await guild.fetch_member(monitored_user_id)
+                except discord.NotFound:
+                    logger.info(
+                        "監視対象member取得失敗(fetch_member NotFound): "
+                        "guild_id=%s user_id=%s",
+                        guild.id,
+                        monitored_user_id,
+                    )
+                except discord.Forbidden:
+                    logger.exception(
+                        "監視対象member取得失敗(fetch_member Forbidden): "
+                        "guild_id=%s user_id=%s",
+                        guild.id,
+                        monitored_user_id,
+                    )
+                except discord.DiscordException:
+                    logger.exception(
+                        "監視対象member取得失敗(fetch_member DiscordException): "
+                        "guild_id=%s user_id=%s",
+                        guild.id,
+                        monitored_user_id,
+                    )
+                else:
+                    logger.info(
+                        "監視対象member取得成功(fetch_member): "
+                        "guild_id=%s user_id=%s name=%s status=%s",
+                        guild.id,
+                        monitored_user_id,
+                        fetched_member.name,
+                        fetched_member.status,
+                    )
 
     @tasks.loop(time=DAILY_REPORT_TIME)
     async def daily_report_task() -> None:
@@ -601,6 +698,9 @@ def create_bot(target_user_id: int) -> commands.Bot:
         print("Botが起動しました")
         print(f"Bot名: {bot.user.name}")
         print(f"Bot ID: {bot.user.id}")
+
+        await load_monitored_user_ids()
+        await log_monitored_member_statuses()
 
         if not daily_report_task.is_running():
             daily_report_task.start()
@@ -656,8 +756,21 @@ def create_bot(target_user_id: int) -> commands.Bot:
         before: discord.Member,
         after: discord.Member,
     ) -> None:
-        """Handle online and offline notifications for the target user."""
-        if after.id != target_user_id:
+        """Handle online and offline notifications for monitored users."""
+        logger.info(
+            "Presence Update受信: user_id=%s before_status=%s after_status=%s",
+            after.id,
+            before.status,
+            after.status,
+        )
+
+        if after.id not in monitored_user_ids:
+            logger.info(
+                "監視対象外のPresence Updateをスキップします。"
+                "user_id=%s monitored_user_ids=%s",
+                after.id,
+                sorted(monitored_user_ids),
+            )
             return
 
         # idleやdndもDiscord上はオンライン扱いなので、offline以外をオンラインとして扱います。
