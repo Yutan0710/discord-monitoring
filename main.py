@@ -550,11 +550,11 @@ def generate_period_report_graph(
     chart.set_ylim(0, y_limit)
     chart.set_yticks([0, 6, 12, 18, 24])
     chart.set_yticklabels([
-        "0\u6642\u9593",
-        "6\u6642\u9593",
-        "12\u6642\u9593",
-        "18\u6642\u9593",
-        "24\u6642\u9593",
+        "0",
+        "6",
+        "12",
+        "18",
+        "24",
     ])
     chart.set_ylabel("オンライン時間", color="#3b404a", fontsize=10)
     chart.grid(axis="y", color="#e4e7ee", linestyle=(0, (2, 4)), linewidth=1)
@@ -926,6 +926,7 @@ async def run_cleanup_old_logs() -> int:
 
     return deleted_count
 
+
 def get_discord_token() -> str:
     """Load the Discord bot token from the environment."""
     load_dotenv()
@@ -956,6 +957,23 @@ def get_target_user_id() -> int:
 
 
 
+
+def get_admin_user_id() -> int:
+    """Load the Discord user ID allowed to run management commands."""
+    load_dotenv()
+
+    admin_user_id = os.getenv("ADMIN_USER_ID")
+    if not admin_user_id:
+        raise RuntimeError(
+            "ADMIN_USER_ID is not set. Add ADMIN_USER_ID to .env."
+        )
+
+    try:
+        return int(admin_user_id)
+    except ValueError as error:
+        raise RuntimeError("ADMIN_USER_ID must be numeric.") from error
+
+
 def create_bot(target_user_id: int) -> commands.Bot:
     """Create and configure the Discord bot."""
     intents = discord.Intents.default()
@@ -973,6 +991,36 @@ def create_bot(target_user_id: int) -> commands.Bot:
 
     bot = commands.Bot(command_prefix="!", intents=intents)
     monitored_user_ids: set[int] = {target_user_id}
+
+    def admin_only() -> commands.Check[commands.Context[commands.Bot]]:
+        """Allow only ADMIN_USER_ID to run management commands."""
+        async def predicate(context: commands.Context[commands.Bot]) -> bool:
+            try:
+                admin_user_id = get_admin_user_id()
+            except RuntimeError as error:
+                logger.error("admin_check_configuration_error error=%s", error)
+                await context.send(
+                    "\u7ba1\u7406\u8005\u8a2d\u5b9a\u304c"
+                    "\u898b\u3064\u304b\u308a\u307e\u305b\u3093\u3002"
+                    "ADMIN_USER_ID \u3092\u78ba\u8a8d\u3057\u3066\u304f\u3060\u3055\u3044\u3002"
+                )
+                return False
+
+            if context.author.id != admin_user_id:
+                logger.warning(
+                    "admin_command_denied author_id=%s command=%s",
+                    context.author.id,
+                    context.command.qualified_name if context.command else None,
+                )
+                await context.send(
+                    "\u3053\u306e\u30b3\u30de\u30f3\u30c9\u306f"
+                    "\u7ba1\u7406\u8005\u306e\u307f\u5b9f\u884c\u3067\u304d\u307e\u3059\u3002"
+                )
+                return False
+
+            return True
+
+        return commands.check(predicate)
 
     async def load_monitored_user_ids() -> None:
         """Load monitored user IDs from DB, falling back to TARGET_USER_ID."""
@@ -1160,6 +1208,7 @@ def create_bot(target_user_id: int) -> commands.Bot:
             )
 
     @bot.command(name="demo_report")
+    @admin_only()
     async def demo_report(context: commands.Context[commands.Bot]) -> None:
         """Send a demo daily report graph to the command author by DM."""
         author = context.author
@@ -1212,6 +1261,7 @@ def create_bot(target_user_id: int) -> commands.Bot:
         await context.send("pong")
 
     @bot.command(name="weekly_report")
+    @admin_only()
     async def weekly_report(context: commands.Context[commands.Bot]) -> None:
         """Manually send the previous weekly report for verification."""
         logger.info(
@@ -1241,6 +1291,7 @@ def create_bot(target_user_id: int) -> commands.Bot:
         )
 
     @bot.command(name="monthly_report")
+    @admin_only()
     async def monthly_report(context: commands.Context[commands.Bot]) -> None:
         """Manually send the previous monthly report for verification."""
         logger.info(
@@ -1270,6 +1321,7 @@ def create_bot(target_user_id: int) -> commands.Bot:
         )
 
     @bot.command(name="cleanup_preview")
+    @admin_only()
     async def cleanup_preview(context: commands.Context[commands.Bot]) -> None:
         """Show how many old logs would be deleted."""
         logger.info(
@@ -1292,6 +1344,7 @@ def create_bot(target_user_id: int) -> commands.Bot:
         )
 
     @bot.command(name="cleanup_logs")
+    @admin_only()
     async def cleanup_logs(context: commands.Context[commands.Bot]) -> None:
         """Manually delete old finished online logs."""
         logger.info(
@@ -1470,6 +1523,9 @@ def create_bot(target_user_id: int) -> commands.Bot:
     ) -> None:
         """Handle command errors consistently."""
         if isinstance(error, commands.CommandNotFound):
+            return
+
+        if isinstance(error, commands.CheckFailure):
             return
 
         if isinstance(error, commands.MissingRequiredArgument):
