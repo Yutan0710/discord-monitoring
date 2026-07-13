@@ -1198,35 +1198,76 @@ def create_bot(target_user_id: int) -> commands.Bot:
             )
 
 
+    @bot.command(name="ping")
+    async def ping(context: commands.Context[commands.Bot]) -> None:
+        """Reply immediately to confirm prefix commands are received."""
+        logger.info("ping????????????author_id=%s", context.author.id)
+        await context.send("pong")
+
     @bot.command(name="weekly_report")
     async def weekly_report(context: commands.Context[commands.Bot]) -> None:
         """Manually send the previous weekly report for verification."""
-        await run_weekly_report(bot)
-        await context.send("前週レポートをDM通知先へ送信しました。")
+        logger.info("weekly_report????????????author_id=%s", context.author.id)
+        await context.send("???????????????????DM???????")
+
+        try:
+            await run_weekly_report(bot)
+        except Exception:
+            logger.exception("weekly_report???????????????")
+            await context.send("?????????????????????????????")
+            return
+
+        await context.send("????????????????")
 
     @bot.command(name="monthly_report")
     async def monthly_report(context: commands.Context[commands.Bot]) -> None:
         """Manually send the previous monthly report for verification."""
-        await run_monthly_report(bot)
-        await context.send("前月レポートをDM通知先へ送信しました。")
+        logger.info("monthly_report????????????author_id=%s", context.author.id)
+        await context.send("???????????????????DM???????")
+
+        try:
+            await run_monthly_report(bot)
+        except Exception:
+            logger.exception("monthly_report???????????????")
+            await context.send("?????????????????????????????")
+            return
+
+        await context.send("????????????????")
 
     @bot.command(name="cleanup_preview")
     async def cleanup_preview(context: commands.Context[commands.Bot]) -> None:
         """Show how many old logs would be deleted."""
+        logger.info("cleanup_preview????????????author_id=%s", context.author.id)
         try:
             target_count = await asyncio.to_thread(count_old_online_logs)
         except Exception:
-            logger.exception("削除対象オンラインログ件数の確認に失敗しました。")
-            await context.send("削除対象件数の確認に失敗しました。")
+            logger.exception("????????????????????????")
+            await context.send("?????????????????")
             return
 
-        await context.send(f"削除対象のオンラインログ: {target_count}回")
+        await context.send(f"????????????: {target_count}?")
 
     @bot.command(name="cleanup_logs")
     async def cleanup_logs(context: commands.Context[commands.Bot]) -> None:
         """Manually delete old finished online logs."""
+        logger.info("cleanup_logs????????????author_id=%s", context.author.id)
         deleted_count = await run_cleanup_old_logs()
-        await context.send(f"古いオンラインログを削除しました。: {deleted_count}回")
+        await context.send(f"????????????????: {deleted_count}?")
+
+    @bot.event
+    async def on_message(message: discord.Message) -> None:
+        """Log prefix commands and pass them to commands.Bot."""
+        if bot.user is not None and message.author.id == bot.user.id:
+            return
+
+        if message.content.startswith("!"):
+            logger.info(
+                "?????????????????author_id=%s content=%s",
+                message.author.id,
+                message.content,
+            )
+
+        await bot.process_commands(message)
 
     @bot.event
     async def on_presence_update(
