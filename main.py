@@ -963,6 +963,8 @@ def get_admin_user_id() -> int:
     load_dotenv()
 
     admin_user_id = os.getenv("ADMIN_USER_ID")
+    if admin_user_id is not None:
+        admin_user_id = admin_user_id.strip()
     if not admin_user_id:
         raise RuntimeError(
             "ADMIN_USER_ID is not set. Add ADMIN_USER_ID to .env."
@@ -1008,8 +1010,10 @@ def create_bot(target_user_id: int) -> commands.Bot:
 
             if context.author.id != admin_user_id:
                 logger.warning(
-                    "admin_command_denied author_id=%s command=%s",
+                    "admin_command_denied author_id=%s admin_user_id=%s "
+                    "command=%s",
                     context.author.id,
+                    admin_user_id,
                     context.command.qualified_name if context.command else None,
                 )
                 await context.send(
