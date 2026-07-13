@@ -475,8 +475,7 @@ def generate_period_report_graph(
         for index in range(day_count)
     ]
     hours = [seconds / 3600 for seconds in report.daily_duration_seconds]
-    max_hours = max(hours, default=0)
-    y_limit = max(1.0, max_hours * 1.25)
+    y_limit = 24
     average_seconds = (
         report.total_duration_seconds // day_count
         if day_count > 0
@@ -549,6 +548,14 @@ def generate_period_report_graph(
     bar_positions = list(range(day_count))
     chart.bar(bar_positions, hours, color="#5865f2", width=0.62)
     chart.set_ylim(0, y_limit)
+    chart.set_yticks([0, 6, 12, 18, 24])
+    chart.set_yticklabels([
+        "0\u6642\u9593",
+        "6\u6642\u9593",
+        "12\u6642\u9593",
+        "18\u6642\u9593",
+        "24\u6642\u9593",
+    ])
     chart.set_ylabel("オンライン時間", color="#3b404a", fontsize=10)
     chart.grid(axis="y", color="#e4e7ee", linestyle=(0, (2, 4)), linewidth=1)
     chart.set_axisbelow(True)
@@ -1201,58 +1208,101 @@ def create_bot(target_user_id: int) -> commands.Bot:
     @bot.command(name="ping")
     async def ping(context: commands.Context[commands.Bot]) -> None:
         """Reply immediately to confirm prefix commands are received."""
-        logger.info("ping????????????author_id=%s", context.author.id)
+        logger.info("command_received name=ping author_id=%s", context.author.id)
         await context.send("pong")
 
     @bot.command(name="weekly_report")
     async def weekly_report(context: commands.Context[commands.Bot]) -> None:
         """Manually send the previous weekly report for verification."""
-        logger.info("weekly_report????????????author_id=%s", context.author.id)
-        await context.send("???????????????????DM???????")
+        logger.info(
+            "command_received name=weekly_report author_id=%s",
+            context.author.id,
+        )
+        await context.send(
+            "\u524d\u9031\u30ec\u30dd\u30fc\u30c8\u3092"
+            "\u4f5c\u6210\u3057\u3066\u3044\u307e\u3059\u3002"
+            "\u5b8c\u4e86\u5f8c\u306bDM\u3078\u9001\u4fe1\u3057\u307e\u3059\u3002"
+        )
 
         try:
             await run_weekly_report(bot)
         except Exception:
-            logger.exception("weekly_report???????????????")
-            await context.send("?????????????????????????????")
+            logger.exception("command_failed name=weekly_report")
+            await context.send(
+                "\u524d\u9031\u30ec\u30dd\u30fc\u30c8\u306e"
+                "\u4f5c\u6210\u306b\u5931\u6557\u3057\u307e\u3057\u305f\u3002"
+                "\u30ed\u30b0\u3092\u78ba\u8a8d\u3057\u3066\u304f\u3060\u3055\u3044\u3002"
+            )
             return
 
-        await context.send("????????????????")
+        await context.send(
+            "\u524d\u9031\u30ec\u30dd\u30fc\u30c8\u51e6\u7406\u304c"
+            "\u5b8c\u4e86\u3057\u307e\u3057\u305f\u3002"
+        )
 
     @bot.command(name="monthly_report")
     async def monthly_report(context: commands.Context[commands.Bot]) -> None:
         """Manually send the previous monthly report for verification."""
-        logger.info("monthly_report????????????author_id=%s", context.author.id)
-        await context.send("???????????????????DM???????")
+        logger.info(
+            "command_received name=monthly_report author_id=%s",
+            context.author.id,
+        )
+        await context.send(
+            "\u524d\u6708\u30ec\u30dd\u30fc\u30c8\u3092"
+            "\u4f5c\u6210\u3057\u3066\u3044\u307e\u3059\u3002"
+            "\u5b8c\u4e86\u5f8c\u306bDM\u3078\u9001\u4fe1\u3057\u307e\u3059\u3002"
+        )
 
         try:
             await run_monthly_report(bot)
         except Exception:
-            logger.exception("monthly_report???????????????")
-            await context.send("?????????????????????????????")
+            logger.exception("command_failed name=monthly_report")
+            await context.send(
+                "\u524d\u6708\u30ec\u30dd\u30fc\u30c8\u306e"
+                "\u4f5c\u6210\u306b\u5931\u6557\u3057\u307e\u3057\u305f\u3002"
+                "\u30ed\u30b0\u3092\u78ba\u8a8d\u3057\u3066\u304f\u3060\u3055\u3044\u3002"
+            )
             return
 
-        await context.send("????????????????")
+        await context.send(
+            "\u524d\u6708\u30ec\u30dd\u30fc\u30c8\u51e6\u7406\u304c"
+            "\u5b8c\u4e86\u3057\u307e\u3057\u305f\u3002"
+        )
 
     @bot.command(name="cleanup_preview")
     async def cleanup_preview(context: commands.Context[commands.Bot]) -> None:
         """Show how many old logs would be deleted."""
-        logger.info("cleanup_preview????????????author_id=%s", context.author.id)
+        logger.info(
+            "command_received name=cleanup_preview author_id=%s",
+            context.author.id,
+        )
         try:
             target_count = await asyncio.to_thread(count_old_online_logs)
         except Exception:
-            logger.exception("????????????????????????")
-            await context.send("?????????????????")
+            logger.exception("command_failed name=cleanup_preview")
+            await context.send(
+                "\u524a\u9664\u5bfe\u8c61\u4ef6\u6570\u306e"
+                "\u78ba\u8a8d\u306b\u5931\u6557\u3057\u307e\u3057\u305f\u3002"
+            )
             return
 
-        await context.send(f"????????????: {target_count}?")
+        await context.send(
+            f"\u524a\u9664\u5bfe\u8c61\u306e"
+            f"\u30aa\u30f3\u30e9\u30a4\u30f3\u30ed\u30b0: {target_count}\u4ef6"
+        )
 
     @bot.command(name="cleanup_logs")
     async def cleanup_logs(context: commands.Context[commands.Bot]) -> None:
         """Manually delete old finished online logs."""
-        logger.info("cleanup_logs????????????author_id=%s", context.author.id)
+        logger.info(
+            "command_received name=cleanup_logs author_id=%s",
+            context.author.id,
+        )
         deleted_count = await run_cleanup_old_logs()
-        await context.send(f"????????????????: {deleted_count}?")
+        await context.send(
+            f"\u53e4\u3044\u30aa\u30f3\u30e9\u30a4\u30f3\u30ed\u30b0"
+            f"\u3092\u524a\u9664\u3057\u307e\u3057\u305f: {deleted_count}\u4ef6"
+        )
 
     @bot.event
     async def on_message(message: discord.Message) -> None:
@@ -1262,7 +1312,7 @@ def create_bot(target_user_id: int) -> commands.Bot:
 
         if message.content.startswith("!"):
             logger.info(
-                "?????????????????author_id=%s content=%s",
+                "command_message_received author_id=%s content=%s",
                 message.author.id,
                 message.content,
             )
